@@ -2,8 +2,6 @@
 
 .env
 
-config.py
-
 # ignore all python cache files in the project
 __pycache__/
 *.py[cod]
