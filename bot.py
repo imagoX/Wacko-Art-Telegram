@@ -429,7 +429,7 @@ def main():
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
     )
     application.add_handler(CallbackQueryHandler(handle_callback))
-    application.add_handler(error_handler)
+    application.add_error_handler(error_handler)  # Fixed: Use add_error_handler
 
     application.run_polling(allowed_updates=telegram.Update.ALL_TYPES)
     logger.info("Bot started")
