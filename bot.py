@@ -15,6 +15,7 @@ from bs4 import BeautifulSoup
 import logging
 import tempfile
 from datetime import datetime
+from tenacity import retry, stop_after_attempt, wait_fixed
 from config import TOKEN, VALID_USERS, CHAT_IDS
 
 # Configure logging with UTF-8 encoding
@@ -31,7 +32,7 @@ logger = logging.getLogger(__name__)
 # Bot configuration
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB Telegram limit
 MAX_IMAGES = 5  # Maximum images to process per link
-REQUEST_TIMEOUT = 10  # Seconds for HTTP requests
+REQUEST_TIMEOUT = 30  # Increased timeout
 BASE_URL = "https://www.getdailyart.com"
 
 # Store user data for selections and descriptions
@@ -79,7 +80,7 @@ async def help_command(update: telegram.Update, context: ContextTypes.DEFAULT_TY
 def validate_url(url):
     """Validate GetDailyArt URL."""
     parsed = urlparse(url)
-    return all([parsed.scheme, parsed.netloc]) and "getdailyart.com" in url.lower()
+    return all([parsed.scheme, parsed.netloc]) and "www.getdailyart.com" in url.lower()
 
 
 def parse_srcset(srcset):
@@ -97,6 +98,7 @@ def parse_srcset(srcset):
     return max(url_width_pairs, key=lambda x: x[1])[0] if url_width_pairs else None
 
 
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
 def extract_image_and_description(dailyart_url):
     """Extract image URLs and descriptions from a GetDailyArt artwork page."""
     try:
@@ -175,7 +177,7 @@ def extract_image_and_description(dailyart_url):
         return [best_url], short_desc, full_desc
     except requests.RequestException as e:
         logger.error(f"Error extracting from {dailyart_url}: {e}")
-        return None, None, None
+        raise  # Re-raise for retry
 
 
 def download_image(url, temp_dir, index):
@@ -379,7 +381,7 @@ async def handle_message(update: telegram.Update, context: ContextTypes.DEFAULT_
                             await context.bot.send_photo(
                                 chat_id=chat_id,
                                 photo=photo,
-                                caption=f"{short_desc}",
+                                caption=f"Image 1: {short_desc}",
                                 reply_markup=reply_markup,
                             )
                         await update.message.reply_text("Here’s your artwork!")
@@ -416,7 +418,7 @@ async def error_handler(update: telegram.Update, context: ContextTypes.DEFAULT_T
 def main():
     """Start the bot."""
     if not TOKEN:
-        logger.error("No TELEGRAM_BOT_TOKEN provided in .env")
+        logger.error("No TELEGRAM_BOT_TOKEN provided in environment")
         return
 
     application = Application.builder().token(TOKEN).build()
@@ -427,7 +429,7 @@ def main():
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
     )
     application.add_handler(CallbackQueryHandler(handle_callback))
-    application.add_error_handler(error_handler)
+    application.add_handler(error_handler)
 
     application.run_polling(allowed_updates=telegram.Update.ALL_TYPES)
     logger.info("Bot started")
