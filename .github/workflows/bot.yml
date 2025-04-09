@@ -37,7 +37,7 @@ jobs:
       - name: Run GetDailyArt Bot
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          VALID_USERS: ${{ secrets.VALID_USERS }}
-          CHAT_IDS: ${{ secrets.CHAT_IDS }}
+          TELEGRAM_VALID_USERS: ${{ secrets.TELEGRAM_VALID_USERS }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python bot.py
