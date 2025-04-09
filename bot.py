@@ -103,9 +103,16 @@ def extract_image_and_description(dailyart_url):
     """Extract image URLs and descriptions from a GetDailyArt artwork page."""
     try:
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Referer": "https://www.getdailyart.com/",
         }
-        response = requests.get(dailyart_url, headers=headers, timeout=REQUEST_TIMEOUT)
+        response = requests.get(
+            dailyart_url, headers=headers, timeout=REQUEST_TIMEOUT, allow_redirects=True
+        )
+        logger.info(
+            f"Requested {dailyart_url}, redirected to {response.url}, status: {response.status_code}"
+        )
         response.raise_for_status()
 
         soup = BeautifulSoup(response.text, "html.parser")
@@ -183,7 +190,11 @@ def extract_image_and_description(dailyart_url):
 def download_image(url, temp_dir, index):
     """Download image and save temporarily."""
     try:
-        headers = {"User-Agent": "Mozilla/5.0"}
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Referer": "https://www.getdailyart.com/",
+        }
         head_response = requests.head(url, headers=headers, timeout=REQUEST_TIMEOUT)
         content_length = int(head_response.headers.get("Content-Length", 0))
         if content_length > MAX_FILE_SIZE:
@@ -356,7 +367,16 @@ async def handle_message(update: telegram.Update, context: ContextTypes.DEFAULT_
     message_text = update.message.text.strip()
     if validate_url(message_text):
         await update.message.reply_text("Processing your GetDailyArt link...")
-        image_urls, short_desc, full_desc = extract_image_and_description(message_text)
+        try:
+            image_urls, short_desc, full_desc = extract_image_and_description(
+                message_text
+            )
+        except Exception as e:
+            error_msg = "Couldn’t find any artwork images in that link."
+            if "403" in str(e):
+                error_msg = "Access to this artwork is forbidden (HTTP 403). The site may be blocking the bot."
+            await update.message.reply_text(error_msg)
+            return
 
         if not image_urls:
             await update.message.reply_text(
@@ -429,7 +449,7 @@ def main():
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
     )
     application.add_handler(CallbackQueryHandler(handle_callback))
-    application.add_error_handler(error_handler)  # Fixed: Use add_error_handler
+    application.add_error_handler(error_handler)
 
     application.run_polling(allowed_updates=telegram.Update.ALL_TYPES)
     logger.info("Bot started")
