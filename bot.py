@@ -34,7 +34,7 @@ MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB Telegram limit
 MAX_IMAGES = 5  # Maximum images to process per link
 REQUEST_TIMEOUT = 30  # Increased timeout
 BASE_URL = "https://www.getdailyart.com"
-COOLDOWN_SECONDS = 30  # Cooldown period in seconds for non-admins
+COOLDOWN_SECONDS = 10  # Cooldown period in seconds for non-admins
 
 # Store user data for selections, descriptions, and cooldowns
 user_data = {}
@@ -473,7 +473,7 @@ async def handle_message(update: telegram.Update, context: ContextTypes.DEFAULT_
                             await context.bot.send_photo(
                                 chat_id=chat_id,
                                 photo=photo,
-                                caption=f"Image 1: {short_desc}",
+                                caption=f"{short_desc}",
                                 reply_markup=reply_markup,
                             )
                         await update.message.reply_text("Here’s your artwork!")
