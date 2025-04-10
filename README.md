@@ -16,7 +16,7 @@
   </li>
 </ol>
 
-### How to Run:
+## How to Run:
 
 <pre>
   python bot.py  
