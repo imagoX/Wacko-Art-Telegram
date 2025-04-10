@@ -17,7 +17,10 @@
 </ol>
 
 ## How to Run:
-
+<pre>
+  git clone https://github.com/imagoX/Wacko-Art-Telegram
+</pre>
+<br/>
 <pre>
   python bot.py  
 </pre>
