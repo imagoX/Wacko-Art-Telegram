@@ -15,3 +15,9 @@
     python-dotenv
   </li>
 </ol>
+
+### How to Run:
+
+<pre>
+  python bot.py  
+</pre>
