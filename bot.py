@@ -16,7 +16,7 @@ import logging
 import tempfile
 from datetime import datetime
 from tenacity import retry, stop_after_attempt, wait_fixed
-from config import TOKEN, VALID_USERS, CHAT_IDS
+from config import TOKEN, ADMIN_IDS, CHAT_IDS
 
 # Configure logging
 logging.basicConfig(
@@ -34,46 +34,94 @@ MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB Telegram limit
 MAX_IMAGES = 5  # Maximum images to process per link
 REQUEST_TIMEOUT = 30  # Increased timeout
 BASE_URL = "https://www.getdailyart.com"
+COOLDOWN_SECONDS = 30  # Cooldown period in seconds for non-admins
 
-# Store user data for selections and descriptions
+# Store user data for selections, descriptions, and cooldowns
 user_data = {}
+cooldowns = {}  # Track last request time per user
 
 
-def is_valid_user(user_id):
-    """Check if the user is in the list of valid users."""
-    return user_id in VALID_USERS
+def is_admin(user_id):
+    """Check if the user is an admin."""
+    return user_id in ADMIN_IDS
+
+
+def is_allowed_chat(chat_id):
+    """Check if the chat is an allowed group/channel."""
+    return chat_id in CHAT_IDS
+
+
+def check_cooldown(user_id):
+    """Check if the user is within the cooldown period (non-admins only)."""
+    if is_admin(user_id):
+        return True, 0  # Admins are exempt from cooldown
+    current_time = datetime.now().timestamp()
+    last_request = cooldowns.get(user_id, 0)
+    if current_time - last_request < COOLDOWN_SECONDS:
+        remaining = int(COOLDOWN_SECONDS - (current_time - last_request))
+        return False, remaining
+    return True, 0
+
+
+def update_cooldown(user_id):
+    """Update the last request time for the user (non-admins only)."""
+    if not is_admin(user_id):  # Only update cooldown for non-admins
+        cooldowns[user_id] = datetime.now().timestamp()
 
 
 async def start(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
     """Send welcome message with /start."""
-    user_id = update.message.from_user.id
-    if not is_valid_user(user_id):
+    chat_id = update.effective_chat.id
+    chat_type = update.effective_chat.type
+    user_id = update.effective_user.id
+
+    # Check if the chat is a group/channel and if it's allowed
+    if chat_type in ["group", "supergroup", "channel"] and not is_allowed_chat(chat_id):
         await update.message.reply_text(
-            "Sorry, you are not authorized to use this bot."
+            "This bot is not allowed in this group/channel."
         )
         return
+
     await update.message.reply_text(
         "Welcome to the GetDailyArt Bot!\n"
         "- Send a GetDailyArt link to download images (e.g., getdailyart.com/en/22375/w-illiam-piguenit/kosciuszko).\n"
         '- Images include a short description; click "Explanation" for more details.\n'
+        "- Cooldown for non-admins: 30 seconds between requests.\n"
         "Use /help for more info."
     )
 
 
 async def help_command(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
     """Provide help information."""
-    user_id = update.message.from_user.id
-    if not is_valid_user(user_id):
+    chat_id = update.effective_chat.id
+    chat_type = update.effective_chat.type
+    user_id = update.effective_user.id
+
+    # Check if the chat is a group/channel and if it's allowed
+    if chat_type in ["group", "supergroup", "channel"] and not is_allowed_chat(chat_id):
         await update.message.reply_text(
-            "Sorry, you are not authorized to use this bot."
+            "This bot is not allowed in this group/channel."
         )
         return
+
     await update.message.reply_text(
         "How to use this bot:\n"
         "- Send a link like getdailyart.com/en/22375/w-illiam-piguenit/kosciuszko to download.\n"
         '- Images include a short description; click "Explanation" for more details.\n'
         "- Images must be under 10MB (Telegram limit).\n"
-        "- Use /start to restart, /help for this message."
+        "- Cooldown for non-admins: 30 seconds between requests.\n"
+        "Use /start to restart, /help for this message."
+    )
+
+
+async def admin_status(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin-only command to check bot status."""
+    user_id = update.effective_user.id
+    if not is_admin(user_id):
+        await update.message.reply_text("You are not authorized to use this command.")
+        return
+    await update.message.reply_text(
+        f"Bot is running. Admins: {ADMIN_IDS}, Allowed Chats: {CHAT_IDS}"
     )
 
 
@@ -262,8 +310,9 @@ async def handle_callback(update: telegram.Update, context: ContextTypes.DEFAULT
     user_id = query.from_user.id
     data = query.data
 
-    if not is_valid_user(user_id):
-        await query.edit_message_text("Sorry, you are not authorized to use this bot.")
+    chat_type = query.message.chat.type
+    if chat_type in ["group", "supergroup", "channel"] and not is_allowed_chat(chat_id):
+        await query.edit_message_text("This bot is not allowed in this group/channel.")
         return
 
     if chat_id not in user_data or not user_data[chat_id]["urls"]:
@@ -364,12 +413,22 @@ async def handle_callback(update: telegram.Update, context: ContextTypes.DEFAULT
 
 async def handle_message(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle incoming GetDailyArt links."""
-    user_id = update.message.from_user.id
-    chat_id = update.message.chat_id
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    chat_type = update.effective_chat.type
 
-    if not is_valid_user(user_id):
+    # Check if the chat is a group/channel and if it's allowed
+    if chat_type in ["group", "supergroup", "channel"] and not is_allowed_chat(chat_id):
         await update.message.reply_text(
-            "Sorry, you are not authorized to use this bot."
+            "This bot is not allowed in this group/channel."
+        )
+        return
+
+    # Check cooldown (admins are exempt)
+    can_proceed, remaining = check_cooldown(user_id)
+    if not can_proceed:
+        await update.message.reply_text(
+            f"Please wait {remaining} seconds before sending another request."
         )
         return
 
@@ -394,6 +453,9 @@ async def handle_message(update: telegram.Update, context: ContextTypes.DEFAULT_
             )
             return
 
+        # Update cooldown after successful processing (non-admins only)
+        update_cooldown(user_id)
+
         if len(image_urls) == 1:
             with tempfile.TemporaryDirectory() as temp_dir:
                 filename, error = download_image(image_urls[0], temp_dir, 1)
@@ -411,7 +473,7 @@ async def handle_message(update: telegram.Update, context: ContextTypes.DEFAULT_
                             await context.bot.send_photo(
                                 chat_id=chat_id,
                                 photo=photo,
-                                caption=f"{short_desc}",
+                                caption=f"Image 1: {short_desc}",
                                 reply_markup=reply_markup,
                             )
                         await update.message.reply_text("Here’s your artwork!")
@@ -455,6 +517,9 @@ def main():
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(
+        CommandHandler("status", admin_status)
+    )  # Admin-only command
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
     )
