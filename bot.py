@@ -54,7 +54,7 @@ async def start(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text(
         "Welcome to the GetDailyArt Bot!\n"
-        "- Send a GetDailyArt link to download images (e.g., https://www.getdailyart.com/en/22375/w-illiam-piguenit/kosciuszko).\n"
+        "- Send a GetDailyArt link to download images (e.g., getdailyart.com/en/22375/w-illiam-piguenit/kosciuszko).\n"
         '- Images include a short description; click "Explanation" for more details.\n'
         "Use /help for more info."
     )
@@ -70,7 +70,7 @@ async def help_command(update: telegram.Update, context: ContextTypes.DEFAULT_TY
         return
     await update.message.reply_text(
         "How to use this bot:\n"
-        "- Send a link like https://www.getdailyart.com/en/22375/w-illiam-piguenit/kosciuszko to download.\n"
+        "- Send a link like getdailyart.com/en/22375/w-illiam-piguenit/kosciuszko to download.\n"
         '- Images include a short description; click "Explanation" for more details.\n'
         "- Images must be under 10MB (Telegram limit).\n"
         "- Use /start to restart, /help for this message."
@@ -78,9 +78,24 @@ async def help_command(update: telegram.Update, context: ContextTypes.DEFAULT_TY
 
 
 def validate_url(url):
-    """Validate GetDailyArt URL."""
+    """Validate and normalize a GetDailyArt URL."""
+    url = url.strip().lower()
+    # If it doesn't start with http/https, assume https
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
     parsed = urlparse(url)
-    return all([parsed.scheme, parsed.netloc]) and "www.getdailyart.com" in url.lower()
+    # Check if it's a getdailyart.com URL (with or without www)
+    if (
+        "getdailyart.com" not in parsed.netloc
+        and "www.getdailyart.com" not in parsed.netloc
+    ):
+        return None
+    # Normalize to https://www.getdailyart.com
+    if not parsed.netloc.startswith("www."):
+        normalized_url = f"https://www.getdailyart.com{parsed.path}"
+    else:
+        normalized_url = f"https://{parsed.netloc}{parsed.path}"
+    return normalized_url
 
 
 def parse_srcset(srcset):
@@ -365,11 +380,12 @@ async def handle_message(update: telegram.Update, context: ContextTypes.DEFAULT_
         return
 
     message_text = update.message.text.strip()
-    if validate_url(message_text):
+    normalized_url = validate_url(message_text)
+    if normalized_url:
         await update.message.reply_text("Processing your GetDailyArt link...")
         try:
             image_urls, short_desc, full_desc = extract_image_and_description(
-                message_text
+                normalized_url
             )
         except Exception as e:
             error_msg = "Couldn’t find any artwork images in that link."
@@ -401,7 +417,7 @@ async def handle_message(update: telegram.Update, context: ContextTypes.DEFAULT_
                             await context.bot.send_photo(
                                 chat_id=chat_id,
                                 photo=photo,
-                                caption=f"{short_desc}",
+                                caption=f"Image 1: {short_desc}",
                                 reply_markup=reply_markup,
                             )
                         await update.message.reply_text("Here’s your artwork!")
