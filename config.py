@@ -1,10 +1,6 @@
 import os
-from dotenv import load_dotenv
-
-load_dotenv()
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-
 valid_users_str = os.getenv("TELEGRAM_VALID_USERS", "").replace('[', '').replace(']', '').strip()
 VALID_USERS = [int(user_id) for user_id in valid_users_str.split(",") if user_id]
 chat_ids_str = os.getenv("TELEGRAM_CHAT_ID", "").replace('[', '').replace(']', '').strip()
