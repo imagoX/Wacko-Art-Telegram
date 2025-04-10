@@ -34,7 +34,9 @@ MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB Telegram limit
 MAX_IMAGES = 5  # Maximum images to process per link
 REQUEST_TIMEOUT = 30  # Increased timeout
 BASE_URL = "https://www.getdailyart.com"
-COOLDOWN_SECONDS = 10  # Cooldown period in seconds for non-admins
+COOLDOWN_SECONDS = (
+    10  # Cooldown period in seconds for non-admins (changed from 30 to 10)
+)
 
 # Store user data for selections, descriptions, and cooldowns
 user_data = {}
@@ -86,7 +88,7 @@ async def start(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
         "Welcome to the GetDailyArt Bot!\n"
         "- Send a GetDailyArt link to download images (e.g., getdailyart.com/en/22375/w-illiam-piguenit/kosciuszko).\n"
         '- Images include a short description; click "Explanation" for more details.\n'
-        "- Cooldown for non-admins: 30 seconds between requests.\n"
+        "- Cooldown for non-admins: 10 seconds between requests.\n"
         "Use /help for more info."
     )
 
@@ -109,7 +111,7 @@ async def help_command(update: telegram.Update, context: ContextTypes.DEFAULT_TY
         "- Send a link like getdailyart.com/en/22375/w-illiam-piguenit/kosciuszko to download.\n"
         '- Images include a short description; click "Explanation" for more details.\n'
         "- Images must be under 10MB (Telegram limit).\n"
-        "- Cooldown for non-admins: 30 seconds between requests.\n"
+        "- Cooldown for non-admins: 10 seconds between requests.\n"
         "Use /start to restart, /help for this message."
     )
 
