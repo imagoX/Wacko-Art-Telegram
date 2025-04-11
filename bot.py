@@ -600,15 +600,9 @@ def schedule_daily_art(job_queue: JobQueue):
     # Set the time to 15:00 (3:00 PM) every day
     daily_time = time(hour=15, minute=0, second=0)
 
-    # Calculate the first run time (today at 3:00 PM, or tomorrow if already past 3:00 PM)
-    now = datetime.now()
-    first_run = datetime.combine(now.date(), daily_time)
-    if now > first_run:
-        first_run += timedelta(days=1)
-
     # Schedule the job to run daily at 3:00 PM
-    job_queue.run_daily(callback=send_daily_art, time=daily_time, first=first_run)
-    logger.info(f"Scheduled daily art task at 3:00 PM, first run at {first_run}")
+    job_queue.run_daily(callback=send_daily_art, time=daily_time)
+    logger.info(f"Scheduled daily art task at 3:00 PM")
 
 
 def main():
