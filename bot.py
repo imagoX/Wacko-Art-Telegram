@@ -561,7 +561,7 @@ async def handle_message(update: telegram.Update, context: ContextTypes.DEFAULT_
                             await context.bot.send_photo(
                                 chat_id=chat_id,
                                 photo=photo,
-                                caption=f"Image 1: {short_desc}",
+                                caption=f"{short_desc}",
                                 reply_markup=reply_markup,
                             )
                         await update.message.reply_text("Here’s your artwork!")
