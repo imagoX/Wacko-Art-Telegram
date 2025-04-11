@@ -7,6 +7,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     filters,
     ContextTypes,
+    JobQueue,
 )
 import requests
 import os
@@ -14,7 +15,8 @@ from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 import logging
 import tempfile
-from datetime import datetime
+from datetime import datetime, time, timedelta
+import random
 from tenacity import retry, stop_after_attempt, wait_fixed
 from config import TOKEN, ADMIN_IDS, CHAT_IDS
 
@@ -34,9 +36,8 @@ MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB Telegram limit
 MAX_IMAGES = 5  # Maximum images to process per link
 REQUEST_TIMEOUT = 30  # Increased timeout
 BASE_URL = "https://www.getdailyart.com"
-COOLDOWN_SECONDS = (
-    10  # Cooldown period in seconds for non-admins (changed from 30 to 10)
-)
+COOLDOWN_SECONDS = 10  # Cooldown period in seconds for non-admins
+MAX_ATTEMPTS = 10  # Maximum attempts to find a valid artwork
 
 # Store user data for selections, descriptions, and cooldowns
 user_data = {}
@@ -71,6 +72,12 @@ def update_cooldown(user_id):
         cooldowns[user_id] = datetime.now().timestamp()
 
 
+def generate_random_art_url():
+    """Generate a random GetDailyArt URL with a random number."""
+    random_id = random.randint(1, 30000)  # Adjust range based on known artwork IDs
+    return f"https://www.getdailyart.com/en/{random_id}/random-artist/random-artwork"
+
+
 async def start(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
     """Send welcome message with /start."""
     chat_id = update.effective_chat.id
@@ -89,6 +96,7 @@ async def start(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
         "- Send a GetDailyArt link to download images (e.g., getdailyart.com/en/22375/w-illiam-piguenit/kosciuszko).\n"
         '- Images include a short description; click "Explanation" for more details.\n'
         "- Cooldown for non-admins: 10 seconds between requests.\n"
+        "- A random artwork is sent daily at 3:00 PM to allowed chats.\n"
         "Use /help for more info."
     )
 
@@ -112,6 +120,7 @@ async def help_command(update: telegram.Update, context: ContextTypes.DEFAULT_TY
         '- Images include a short description; click "Explanation" for more details.\n'
         "- Images must be under 10MB (Telegram limit).\n"
         "- Cooldown for non-admins: 10 seconds between requests.\n"
+        "- A random artwork is sent daily at 3:00 PM to allowed chats.\n"
         "Use /start to restart, /help for this message."
     )
 
@@ -281,6 +290,83 @@ def download_image(url, temp_dir, index):
         return None, str(e)
 
 
+async def find_valid_artwork():
+    """Try to find a valid artwork by generating random URLs."""
+    for attempt in range(MAX_ATTEMPTS):
+        random_url = generate_random_art_url()
+        logger.info(f"Attempt {attempt + 1}/{MAX_ATTEMPTS}: Trying URL {random_url}")
+        try:
+            image_urls, short_desc, full_desc = extract_image_and_description(
+                random_url
+            )
+            if image_urls:
+                return image_urls, short_desc, full_desc, random_url
+        except Exception as e:
+            logger.warning(f"Attempt {attempt + 1} failed for {random_url}: {e}")
+            continue
+    return None, None, None, None
+
+
+async def send_daily_art(context: ContextTypes.DEFAULT_TYPE):
+    """Send a random artwork to all allowed chats daily at 3:00 PM."""
+    image_urls, short_desc, full_desc, used_url = await find_valid_artwork()
+
+    if not image_urls:
+        for chat_id in CHAT_IDS:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"Daily Art: Couldn’t find a valid artwork after {MAX_ATTEMPTS} attempts.",
+            )
+        return
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        filename, error = download_image(image_urls[0], temp_dir, 1)
+        if not filename:
+            for chat_id in CHAT_IDS:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=f"Daily Art: Failed to download artwork from {used_url}: {error}",
+                )
+            return
+
+        for chat_id in CHAT_IDS:
+            try:
+                file_size = os.path.getsize(filename)
+                if file_size > MAX_FILE_SIZE:
+                    await context.bot.send_message(
+                        chat_id=chat_id,
+                        text=f"Daily Art: Artwork from {used_url} too large ({file_size / 1024 / 1024:.1f}MB)",
+                    )
+                    continue
+
+                keyboard = [
+                    [
+                        InlineKeyboardButton(
+                            "Explanation", callback_data="explain_daily_0"
+                        )
+                    ]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+
+                with open(filename, "rb") as photo:
+                    await context.bot.send_photo(
+                        chat_id=chat_id,
+                        photo=photo,
+                        caption=f"Daily Art: {short_desc}\nSource: {used_url}",
+                        reply_markup=reply_markup,
+                    )
+                user_data[chat_id] = {
+                    "urls": image_urls,
+                    "descriptions": {image_urls[0]: (short_desc, full_desc)},
+                }
+            except telegram.error.TelegramError as e:
+                logger.error(f"Error sending daily art to chat {chat_id}: {e}")
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=f"Daily Art: Error sending artwork from {used_url}: {e}",
+                )
+
+
 async def send_image_selection(
     update: telegram.Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -325,7 +411,7 @@ async def handle_callback(update: telegram.Update, context: ContextTypes.DEFAULT
     descriptions = user_data[chat_id]["descriptions"]
 
     if data.startswith("explain_"):
-        index = int(data.split("_")[1])
+        index = 0 if data == "explain_daily_0" else int(data.split("_")[1])
         url = image_urls[index]
         full_desc = descriptions.get(url, ("", "No detailed description available."))[1]
         await context.bot.send_message(
@@ -475,7 +561,7 @@ async def handle_message(update: telegram.Update, context: ContextTypes.DEFAULT_
                             await context.bot.send_photo(
                                 chat_id=chat_id,
                                 photo=photo,
-                                caption=f"{short_desc}",
+                                caption=f"Image 1: {short_desc}",
                                 reply_markup=reply_markup,
                             )
                         await update.message.reply_text("Here’s your artwork!")
@@ -509,6 +595,22 @@ async def error_handler(update: telegram.Update, context: ContextTypes.DEFAULT_T
         )
 
 
+def schedule_daily_art(job_queue: JobQueue):
+    """Schedule the daily art task at 3:00 PM."""
+    # Set the time to 15:00 (3:00 PM) every day
+    daily_time = time(hour=15, minute=0, second=0)
+
+    # Calculate the first run time (today at 3:00 PM, or tomorrow if already past 3:00 PM)
+    now = datetime.now()
+    first_run = datetime.combine(now.date(), daily_time)
+    if now > first_run:
+        first_run += timedelta(days=1)
+
+    # Schedule the job to run daily at 3:00 PM
+    job_queue.run_daily(callback=send_daily_art, time=daily_time, first=first_run)
+    logger.info(f"Scheduled daily art task at 3:00 PM, first run at {first_run}")
+
+
 def main():
     """Start the bot."""
     if not TOKEN:
@@ -527,6 +629,9 @@ def main():
     )
     application.add_handler(CallbackQueryHandler(handle_callback))
     application.add_error_handler(error_handler)
+
+    # Schedule the daily art task
+    schedule_daily_art(application.job_queue)
 
     application.run_polling(allowed_updates=telegram.Update.ALL_TYPES)
     logger.info("Bot started")
